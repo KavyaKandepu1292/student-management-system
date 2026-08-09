@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIT Records — Login</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="card login-card">
+    <h1>🎓 VIT Records</h1>
+    <p class="sub">Unified Student Administration Framework</p>
+
+    <div id="alertBox"></div>
+
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" placeholder="Enter your username" required>
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter your password" required>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%" id="loginBtn">Sign In</button>
+    </form>
+
+    <p class="switch-link">Don't have an account? <a href="register.html">Register here</a></p>
+    <p class="switch-link" style="opacity:0.6;font-size:0.8rem;">Default admin: admin / Admin@123</p>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script>
+  if (Auth.isLoggedIn()) {
+    window.location.href = Auth.isAdmin() ? "dashboard.html" : "students.html";
+  }
+
+  const form = document.getElementById("loginForm");
+  const alertBox = document.getElementById("alertBox");
+  const loginBtn = document.getElementById("loginBtn");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    alertBox.innerHTML = "";
+    loginBtn.disabled = true;
+    loginBtn.textContent = "Signing in...";
+
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value;
+
+    try {
+      const data = await apiRequest("/auth/login", { method: "POST", body: { username, password } });
+      Auth.setSession(data);
+      window.location.href = data.role === "ADMIN" ? "dashboard.html" : "students.html";
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = "Sign In";
+    }
+  });
+</script>
+</body>
+</html>

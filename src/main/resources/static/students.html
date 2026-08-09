@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIT Records — Students</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="container">
+  <div class="topbar">
+    <div class="brand">
+      <div>
+        <h1>🎓 VIT Records</h1>
+        <div class="tagline">Unified Student Administration Framework</div>
+      </div>
+    </div>
+    <div class="nav-links" id="navLinks"></div>
+  </div>
+
+  <div id="alertBox"></div>
+
+  <div class="card">
+    <div class="topbar" style="margin-bottom:16px;">
+      <h2 style="margin:0;">Enrolled Registry</h2>
+      <button class="btn btn-primary" id="addBtn">+ Register New Student</button>
+    </div>
+
+    <div class="filters">
+      <input type="text" id="searchInput" placeholder="Search by name or email...">
+      <input type="text" id="deptFilter" placeholder="Filter by department...">
+      <button class="btn btn-outline btn-sm" id="clearFilters">Clear</button>
+    </div>
+
+    <div id="tableWrap">
+      <table>
+        <thead>
+          <tr><th>ID</th><th>First Name</th><th>Last Name</th><th>Email</th><th>Department</th><th>GPA</th><th id="opsHeader">Operations</th></tr>
+        </thead>
+        <tbody id="studentsBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="pagination"></div>
+  </div>
+</div>
+
+<!-- Modal form for create/edit -->
+<div id="modalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;z-index:50;">
+  <div class="card" style="width:100%;max-width:480px;">
+    <h2 id="modalTitle" style="margin-top:0;">Register New Student</h2>
+    <div id="modalAlert"></div>
+    <form id="studentForm">
+      <input type="hidden" id="studentId">
+      <div class="form-row">
+        <div class="form-group">
+          <label>First Name</label>
+          <input type="text" id="firstName" required>
+        </div>
+        <div class="form-group">
+          <label>Last Name</label>
+          <input type="text" id="lastName" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="email" required>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Department</label>
+          <input type="text" id="department" required>
+        </div>
+        <div class="form-group">
+          <label>GPA</label>
+          <input type="number" id="gpa" step="0.01" min="0" max="4" required>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" class="btn btn-outline" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="saveBtn">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+  Auth.requireLogin();
+  renderNav("students");
+
+  const isAdmin = Auth.isAdmin();
+  if (!isAdmin) document.getElementById("opsHeader").style.display = "none";
+  if (!isAdmin) document.getElementById("addBtn").style.display = "none";
+
+  const alertBox = document.getElementById("alertBox");
+  const studentsBody = document.getElementById("studentsBody");
+  const pagination = document.getElementById("pagination");
+  const searchInput = document.getElementById("searchInput");
+  const deptFilter = document.getElementById("deptFilter");
+
+  let currentPage = 0;
+  let debounceTimer = null;
+
+  function debounceReload() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => { currentPage = 0; loadStudents(); }, 350);
+  }
+  searchInput.addEventListener("input", debounceReload);
+  deptFilter.addEventListener("input", debounceReload);
+  document.getElementById("clearFilters").addEventListener("click", () => {
+    searchInput.value = ""; deptFilter.value = ""; currentPage = 0; loadStudents();
+  });
+
+  async function loadStudents() {
+    try {
+      const params = new URLSearchParams({
+        page: currentPage, size: 8,
+        ...(searchInput.value.trim() ? { keyword: searchInput.value.trim() } : {}),
+        ...(deptFilter.value.trim() ? { department: deptFilter.value.trim() } : {})
+      });
+      const data = await apiRequest(`/students?${params.toString()}`);
+      renderTable(data.content);
+      renderPagination(data.totalPages, data.number);
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+    }
+  }
+
+  function renderTable(students) {
+    if (!students.length) {
+      studentsBody.innerHTML = `<tr><td colspan="7"><div class="empty-state">No students found.</div></td></tr>`;
+      return;
+    }
+    studentsBody.innerHTML = students.map(s => `
+      <tr>
+        <td>${s.id}</td>
+        <td>${s.firstName}</td>
+        <td>${s.lastName}</td>
+        <td>${s.email}</td>
+        <td><span class="badge">${s.department}</span></td>
+        <td><strong>${s.gpa.toFixed(2)}</strong></td>
+        ${isAdmin ? `<td>
+          <button class="btn btn-outline btn-sm" onclick="openEdit(${s.id})">✎ Modify</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteStudent(${s.id})">🗑 Drop</button>
+        </td>` : ""}
+      </tr>
+    `).join("");
+  }
+
+  function renderPagination(totalPages, current) {
+    if (totalPages <= 1) { pagination.innerHTML = ""; return; }
+    let html = `<button ${current === 0 ? "disabled" : ""} onclick="gotoPage(${current - 1})">‹ Prev</button>`;
+    for (let i = 0; i < totalPages; i++) {
+      html += `<button class="${i === current ? 'active' : ''}" onclick="gotoPage(${i})">${i + 1}</button>`;
+    }
+    html += `<button ${current === totalPages - 1 ? "disabled" : ""} onclick="gotoPage(${current + 1})">Next ›</button>`;
+    pagination.innerHTML = html;
+  }
+
+  function gotoPage(page) { currentPage = page; loadStudents(); }
+
+  // ---- Modal / form handling ----
+  const modalOverlay = document.getElementById("modalOverlay");
+  const modalTitle = document.getElementById("modalTitle");
+  const modalAlert = document.getElementById("modalAlert");
+  const studentForm = document.getElementById("studentForm");
+
+  document.getElementById("addBtn").addEventListener("click", () => openModal());
+  document.getElementById("cancelBtn").addEventListener("click", closeModal);
+
+  function openModal() {
+    modalTitle.textContent = "Register New Student";
+    studentForm.reset();
+    document.getElementById("studentId").value = "";
+    modalAlert.innerHTML = "";
+    modalOverlay.style.display = "flex";
+  }
+
+  function closeModal() { modalOverlay.style.display = "none"; }
+
+  async function openEdit(id) {
+    try {
+      const s = await apiRequest(`/students/${id}`);
+      modalTitle.textContent = "Modify Student";
+      document.getElementById("studentId").value = s.id;
+      document.getElementById("firstName").value = s.firstName;
+      document.getElementById("lastName").value = s.lastName;
+      document.getElementById("email").value = s.email;
+      document.getElementById("department").value = s.department;
+      document.getElementById("gpa").value = s.gpa;
+      modalAlert.innerHTML = "";
+      modalOverlay.style.display = "flex";
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+    }
+  }
+
+  async function deleteStudent(id) {
+    if (!confirm("Are you sure you want to drop this student? This cannot be undone.")) return;
+    try {
+      await apiRequest(`/students/${id}`, { method: "DELETE" });
+      loadStudents();
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+    }
+  }
+
+  studentForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    modalAlert.innerHTML = "";
+    const id = document.getElementById("studentId").value;
+    const payload = {
+      firstName: document.getElementById("firstName").value.trim(),
+      lastName: document.getElementById("lastName").value.trim(),
+      email: document.getElementById("email").value.trim(),
+      department: document.getElementById("department").value.trim(),
+      gpa: parseFloat(document.getElementById("gpa").value)
+    };
+    try {
+      if (id) {
+        await apiRequest(`/students/${id}`, { method: "PUT", body: payload });
+      } else {
+        await apiRequest(`/students`, { method: "POST", body: payload });
+      }
+      closeModal();
+      loadStudents();
+    } catch (err) {
+      let msg = err.message;
+      if (err.fieldErrors) msg += "<br>" + Object.values(err.fieldErrors).join("<br>");
+      modalAlert.innerHTML = `<div class="alert alert-error">${msg}</div>`;
+    }
+  });
+
+  loadStudents();
+</script>
+</body>
+</html>

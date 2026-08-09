@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIT Records — Attendance</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="container">
+  <div class="topbar">
+    <div class="brand">
+      <div>
+        <h1>🎓 VIT Records</h1>
+        <div class="tagline">Unified Student Administration Framework</div>
+      </div>
+    </div>
+    <div class="nav-links" id="navLinks"></div>
+  </div>
+
+  <div id="alertBox"></div>
+
+  <div class="card" style="margin-bottom:20px;">
+    <h2 style="margin-top:0;">Look Up Attendance</h2>
+    <div class="filters">
+      <select id="studentSelect"><option value="">Select student...</option></select>
+      <button class="btn btn-outline" id="lookupBtn">View Records</button>
+      <span id="percentageBadge"></span>
+    </div>
+    <table id="attTable" style="display:none;">
+      <thead><tr><th>Date</th><th>Course</th><th>Status</th><th id="opsHeader">Operations</th></tr></thead>
+      <tbody id="attBody"></tbody>
+    </table>
+    <div id="emptyMsg" class="empty-state" style="display:none;">No attendance records for this student yet.</div>
+  </div>
+
+  <div class="card" id="recordCard" style="display:none;">
+    <h2 style="margin-top:0;">Record Attendance</h2>
+    <div id="formAlert"></div>
+    <form id="attForm">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Student</label>
+          <select id="formStudent" required></select>
+        </div>
+        <div class="form-group">
+          <label>Course</label>
+          <select id="formCourse" required></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="formDate" required>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="formStatus" required>
+            <option value="PRESENT">Present</option>
+            <option value="ABSENT">Absent</option>
+            <option value="LATE">Late</option>
+          </select>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Record Attendance</button>
+    </form>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+  Auth.requireLogin();
+  renderNav("attendance");
+  const isAdmin = Auth.isAdmin();
+  if (!isAdmin) document.getElementById("opsHeader").style.display = "none";
+  if (isAdmin) document.getElementById("recordCard").style.display = "block";
+
+  const alertBox = document.getElementById("alertBox");
+  const studentSelect = document.getElementById("studentSelect");
+  const formStudent = document.getElementById("formStudent");
+  const formCourse = document.getElementById("formCourse");
+
+  async function loadDropdowns() {
+    try {
+      const studentsPage = await apiRequest("/students?size=200");
+      const options = studentsPage.content.map(s =>
+        `<option value="${s.id}">${s.firstName} ${s.lastName} (${s.department})</option>`).join("");
+      studentSelect.innerHTML += options;
+      formStudent.innerHTML = options;
+
+      if (isAdmin) {
+        const courses = await apiRequest("/courses");
+        formCourse.innerHTML = courses.map(c => `<option value="${c.id}">${c.code} - ${c.name}</option>`).join("");
+      }
+
+      // If a STUDENT is logged in, auto-select and lock their own record
+      const myStudentId = Auth.getStudentId();
+      if (!isAdmin && myStudentId) {
+        studentSelect.value = myStudentId;
+        studentSelect.disabled = true;
+        lookup();
+      }
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+    }
+  }
+
+  const attTable = document.getElementById("attTable");
+  const attBody = document.getElementById("attBody");
+  const emptyMsg = document.getElementById("emptyMsg");
+  const percentageBadge = document.getElementById("percentageBadge");
+
+  async function lookup() {
+    const studentId = studentSelect.value;
+    if (!studentId) return;
+    try {
+      const records = await apiRequest(`/attendance/student/${studentId}`);
+      const pct = await apiRequest(`/attendance/student/${studentId}/percentage`);
+      percentageBadge.innerHTML = `<span class="badge badge-present">Attendance: ${pct.attendancePercentage}%</span>`;
+
+      if (!records.length) {
+        attTable.style.display = "none";
+        emptyMsg.style.display = "block";
+        return;
+      }
+      emptyMsg.style.display = "none";
+      attTable.style.display = "table";
+
+      // fetch course names for display
+      const courses = await apiRequest("/courses");
+      const courseMap = Object.fromEntries(courses.map(c => [c.id, `${c.code} - ${c.name}`]));
+
+      attBody.innerHTML = records.map(r => {
+        const badgeClass = r.status === "PRESENT" ? "badge-present" : r.status === "ABSENT" ? "badge-absent" : "badge-late";
+        return `<tr>
+          <td>${r.date}</td>
+          <td>${courseMap[r.courseId] || r.courseId}</td>
+          <td><span class="badge ${badgeClass}">${r.status}</span></td>
+          ${isAdmin ? `<td><button class="btn btn-danger btn-sm" onclick="deleteRecord(${r.id})">🗑 Delete</button></td>` : ""}
+        </tr>`;
+      }).join("");
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+    }
+  }
+
+  async function deleteRecord(id) {
+    if (!confirm("Delete this attendance record?")) return;
+    try { await apiRequest(`/attendance/${id}`, { method: "DELETE" }); lookup(); }
+    catch (err) { alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`; }
+  }
+
+  document.getElementById("lookupBtn").addEventListener("click", lookup);
+
+  const attForm = document.getElementById("attForm");
+  const formAlert = document.getElementById("formAlert");
+  if (attForm) {
+    attForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      formAlert.innerHTML = "";
+      const payload = {
+        studentId: parseInt(formStudent.value, 10),
+        courseId: parseInt(formCourse.value, 10),
+        date: document.getElementById("formDate").value,
+        status: document.getElementById("formStatus").value
+      };
+      try {
+        await apiRequest("/attendance", { method: "POST", body: payload });
+        formAlert.innerHTML = `<div class="alert alert-success">Attendance recorded.</div>`;
+        if (studentSelect.value == payload.studentId) lookup();
+      } catch (err) {
+        formAlert.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+      }
+    });
+  }
+
+  loadDropdowns();
+</script>
+</body>
+</html>

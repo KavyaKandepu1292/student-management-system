@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIT Records — Courses</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="container">
+  <div class="topbar">
+    <div class="brand">
+      <div>
+        <h1>🎓 VIT Records</h1>
+        <div class="tagline">Unified Student Administration Framework</div>
+      </div>
+    </div>
+    <div class="nav-links" id="navLinks"></div>
+  </div>
+
+  <div id="alertBox"></div>
+
+  <div class="card">
+    <div class="topbar" style="margin-bottom:16px;">
+      <h2 style="margin:0;">Course Catalog</h2>
+      <button class="btn btn-primary" id="addBtn">+ Add Course</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Code</th><th>Name</th><th>Department</th><th>Credits</th><th id="opsHeader">Operations</th></tr>
+      </thead>
+      <tbody id="coursesBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="modalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;z-index:50;">
+  <div class="card" style="width:100%;max-width:440px;">
+    <h2 id="modalTitle" style="margin-top:0;">Add Course</h2>
+    <div id="modalAlert"></div>
+    <form id="courseForm">
+      <input type="hidden" id="courseId">
+      <div class="form-group"><label>Course Code</label><input type="text" id="code" placeholder="e.g., CS301" required></div>
+      <div class="form-group"><label>Course Name</label><input type="text" id="name" placeholder="e.g., Data Structures" required></div>
+      <div class="form-row">
+        <div class="form-group"><label>Department</label><input type="text" id="department" required></div>
+        <div class="form-group"><label>Credits</label><input type="number" id="credits" min="1" max="10" required></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button type="button" class="btn btn-outline" id="cancelBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script>
+  Auth.requireLogin();
+  renderNav("courses");
+
+  const isAdmin = Auth.isAdmin();
+  if (!isAdmin) { document.getElementById("opsHeader").style.display = "none"; document.getElementById("addBtn").style.display = "none"; }
+
+  const alertBox = document.getElementById("alertBox");
+  const coursesBody = document.getElementById("coursesBody");
+  const modalOverlay = document.getElementById("modalOverlay");
+  const modalTitle = document.getElementById("modalTitle");
+  const modalAlert = document.getElementById("modalAlert");
+  const courseForm = document.getElementById("courseForm");
+
+  async function loadCourses() {
+    try {
+      const courses = await apiRequest("/courses");
+      if (!courses.length) {
+        coursesBody.innerHTML = `<tr><td colspan="6"><div class="empty-state">No courses yet.</div></td></tr>`;
+        return;
+      }
+      coursesBody.innerHTML = courses.map(c => `
+        <tr>
+          <td>${c.id}</td>
+          <td><span class="badge">${c.code}</span></td>
+          <td>${c.name}</td>
+          <td>${c.department}</td>
+          <td>${c.credits}</td>
+          ${isAdmin ? `<td>
+            <button class="btn btn-outline btn-sm" onclick="openEdit(${c.id})">✎ Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteCourse(${c.id})">🗑 Delete</button>
+          </td>` : ""}
+        </tr>
+      `).join("");
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+    }
+  }
+
+  document.getElementById("addBtn").addEventListener("click", () => {
+    modalTitle.textContent = "Add Course";
+    courseForm.reset();
+    document.getElementById("courseId").value = "";
+    modalAlert.innerHTML = "";
+    modalOverlay.style.display = "flex";
+  });
+  document.getElementById("cancelBtn").addEventListener("click", () => modalOverlay.style.display = "none");
+
+  async function openEdit(id) {
+    try {
+      const c = await apiRequest(`/courses/${id}`);
+      modalTitle.textContent = "Edit Course";
+      document.getElementById("courseId").value = c.id;
+      document.getElementById("code").value = c.code;
+      document.getElementById("name").value = c.name;
+      document.getElementById("department").value = c.department;
+      document.getElementById("credits").value = c.credits;
+      modalAlert.innerHTML = "";
+      modalOverlay.style.display = "flex";
+    } catch (err) {
+      alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+    }
+  }
+
+  async function deleteCourse(id) {
+    if (!confirm("Delete this course?")) return;
+    try { await apiRequest(`/courses/${id}`, { method: "DELETE" }); loadCourses(); }
+    catch (err) { alertBox.innerHTML = `<div class="alert alert-error">${err.message}</div>`; }
+  }
+
+  courseForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    modalAlert.innerHTML = "";
+    const id = document.getElementById("courseId").value;
+    const payload = {
+      code: document.getElementById("code").value.trim(),
+      name: document.getElementById("name").value.trim(),
+      department: document.getElementById("department").value.trim(),
+      credits: parseInt(document.getElementById("credits").value, 10)
+    };
+    try {
+      if (id) await apiRequest(`/courses/${id}`, { method: "PUT", body: payload });
+      else await apiRequest(`/courses`, { method: "POST", body: payload });
+      modalOverlay.style.display = "none";
+      loadCourses();
+    } catch (err) {
+      let msg = err.message;
+      if (err.fieldErrors) msg += "<br>" + Object.values(err.fieldErrors).join("<br>");
+      modalAlert.innerHTML = `<div class="alert alert-error">${msg}</div>`;
+    }
+  });
+
+  loadCourses();
+</script>
+</body>
+</html>
